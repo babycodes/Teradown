@@ -202,6 +202,11 @@ export function createTeradownServer({ siteUrl = site, interactionTimeout = 25_0
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    process.loadEnvFile(new URL('../.env', import.meta.url));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
   const host = process.env.HOST || '127.0.0.1';
   const port = Number(process.env.PORT || 9876);
   createTeradownServer().listen(port, host, () => {

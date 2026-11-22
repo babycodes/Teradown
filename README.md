@@ -21,6 +21,8 @@ Buka `http://127.0.0.1:9876` di mesin yang menjalankan server. Atur `HOST` atau 
 
 Untuk Cloudflare Tunnel, atur **Service URL** ke `http://127.0.0.1:9876`. Jalankan Teradown dan `cloudflared` pada mesin dan namespace jaringan yang sama agar connector dapat mencapai alamat loopback. Dari lingkungan tempat connector berjalan, periksa origin dengan `curl -fsS http://127.0.0.1:9876/`.
 
+`npm run web` membaca file `.env` di root proyek jika tersedia. Simpan konfigurasi lokal TeraboxAPI sebagai `TERABOX_API_KEY=`. Integrasi TeraboxAPI masih memerlukan kontrak endpoint yang terdokumentasi.
+
 ### CLI
 
 Setel `URL_TERA` ke URL berbagi HTTPS milik Anda, lalu jalankan:
