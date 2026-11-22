@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f7fb">
+  <title>Teradown — Unduh file TeraBox</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="/"><span class="brand-icon" aria-hidden="true"><span class="arrow-down"></span></span>Teradown<span class="brand-dot">.</span></a>
+    </div>
+  </header>
+  <main class="shell">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-pattern" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <div class="hero-icon" aria-hidden="true"><span class="box-icon"></span></div>
+        <h1 id="hero-title">Unduh file TeraBox</h1>
+        <p>Tempel tautan berbagi untuk melihat folder dan mengunduh file dalam satu halaman.</p>
+        <form id="lookup" class="lookup">
+          <label class="sr-only" for="share">Tautan berbagi TeraBox</label>
+          <span class="link-icon" aria-hidden="true"></span>
+          <input id="share" name="share" type="url" placeholder="https://1024terabox.com/s/..." autocomplete="off" spellcheck="false" maxlength="2048" required>
+          <button id="submit" class="primary" type="submit">Tampilkan file <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="hint">Gunakan tautan berbagi publik yang Anda miliki atau diizinkan untuk diunduh.</p>
+      </div>
+    </section>
+
+    <section class="results" aria-labelledby="results-title" id="results" aria-busy="false">
+      <header class="results-header">
+        <div class="section-icon" aria-hidden="true"><span class="folder-icon"></span></div>
+        <div class="results-heading">
+          <h2 id="results-title">Daftar file</h2>
+          <p id="count">Isi tautan yang Anda masukkan</p>
+        </div>
+        <div id="search-wrap" class="search" hidden>
+          <span class="search-icon" aria-hidden="true"></span>
+          <label class="sr-only" for="search">Cari file atau folder</label>
+          <input type="search" id="search" placeholder="Cari file atau folder">
+        </div>
+      </header>
+      <nav id="breadcrumbs" class="breadcrumbs" aria-label="Lokasi folder" hidden></nav>
+      <p id="notice" class="notice" role="status" hidden></p>
+      <div id="state" class="empty" role="status">
+        <div class="empty-icon" aria-hidden="true"><span class="folder-icon"></span></div>
+        <strong>Belum ada file</strong>
+        <span>Masukkan tautan TeraBox di atas untuk melihat isinya.</span>
+      </div>
+      <div id="list" class="file-list" hidden></div>
+    </section>
+    <footer class="footer">
+      <span>Hasil file bersumber dari 1024Teradl.</span>
+    </footer>
+  </main>
+</body>
+</html>
