@@ -202,7 +202,7 @@ export function createTeradownServer({ siteUrl = site, interactionTimeout = 25_0
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const host = process.env.HOST || '0.0.0.0';
+  const host = process.env.HOST || '127.0.0.1';
   const port = Number(process.env.PORT || 9876);
   createTeradownServer().listen(port, host, () => {
     console.log(`Teradown berjalan di http://${host}:${port}`);

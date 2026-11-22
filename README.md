@@ -17,7 +17,9 @@ npm test
 npm run web
 ```
 
-Buka `http://localhost:9876` di mesin yang menjalankan server. Atur `HOST` atau `PORT` jika perlu. Tempel tautan dan klik **Tampilkan file**. Daftar mendukung pencarian, navigasi folder, dan tombol **Unduh**. Browser menerima file dari server Teradown melalui halaman yang sama. Server menggunakan Chromium headless. Jika 1024Teradl meminta verifikasi manusia, gunakan CLI berjendela.
+Buka `http://127.0.0.1:9876` di mesin yang menjalankan server. Atur `HOST` atau `PORT` jika perlu. Tempel tautan dan klik **Tampilkan file**. Daftar mendukung pencarian, navigasi folder, dan tombol **Unduh**. Browser menerima file dari server Teradown melalui halaman yang sama. Server menggunakan Chromium headless. Jika 1024Teradl meminta verifikasi manusia, gunakan CLI berjendela.
+
+Untuk Cloudflare Tunnel, atur **Service URL** ke `http://127.0.0.1:9876`. Jalankan Teradown dan `cloudflared` pada mesin dan namespace jaringan yang sama agar connector dapat mencapai alamat loopback. Dari lingkungan tempat connector berjalan, periksa origin dengan `curl -fsS http://127.0.0.1:9876/`.
 
 ### CLI
 
