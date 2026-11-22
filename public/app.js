@@ -152,8 +152,17 @@ async function load(path, url, name) {
       request.body = JSON.stringify({ url });
     }
     const response = await fetch(path, request);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Permintaan gagal.');
+    const type = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+    if (type !== 'application/json') {
+      throw new Error(`Server mengirim halaman di luar API (HTTP ${response.status}). Jika memakai Cloudflare Tunnel, pastikan rute /api diteruskan ke Teradown.`);
+    }
+    const data = await response.json().catch(() => {
+      throw new Error('Respons API Teradown rusak. Silakan coba lagi.');
+    });
+    if (!response.ok) throw new Error(data?.error || `Permintaan gagal (HTTP ${response.status}).`);
+    if (!Array.isArray(data?.files) || !Array.isArray(data?.folders)) {
+      throw new Error('Respons API Teradown tidak berisi daftar file.');
+    }
     trail.push({ name, ...data });
     render();
   } catch (error) {

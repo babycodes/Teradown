@@ -143,6 +143,14 @@ test('membuka folder dan mengunduh file melalui antarmuka Teradown', async (t) =
   await page.goto(appUrl);
   await page.getByText('Belum ada file').waitFor();
   await page.getByRole('textbox', { name: 'Tautan berbagi TeraBox' }).fill(share);
+  const apiUrl = new URL('/api/files', appUrl).href;
+  await page.route(apiUrl, (route) => route.fulfill({
+    status: 502,
+    contentType: 'text/html',
+    body: '<!doctype html><title>Bad Gateway</title>'
+  }), { times: 1 });
+  await page.getByRole('button', { name: 'Tampilkan file' }).click();
+  await page.getByText('Server mengirim halaman di luar API (HTTP 502)', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Tampilkan file' }).click();
   await page.getByText('1 folder · 3 file', { exact: true }).waitFor();
   await page.getByRole('searchbox').fill('arsip');
