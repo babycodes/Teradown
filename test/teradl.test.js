@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -7,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { chromium } from 'playwright-core';
 import { getDownload, listFiles, parseShareUrl, submitShare } from '../src/teradl.js';
 import { createTeradownServer } from '../src/web.js';
+import { createTeraboxApi } from '../src/terabox-api.js';
 
 const share = 'https://1024terabox.com/s/local-smoke-test';
 const content = 'Contoh file Teradown\n';
@@ -133,7 +135,42 @@ test('mengambil tautan langsung dari hasil', async (t) => {
 });
 
 test('membuka folder dan mengunduh file melalui antarmuka Teradown', async (t) => {
-  const app = createTeradownServer({ siteUrl: origin, interactionTimeout: 5000 });
+  const calls = [];
+  const fileUrl = 'https://d.terabox.app/example.txt';
+  const file = (id, name) => ({
+    fs_id: id, server_filename: name, formatted_size: '21 B', direct_link: fileUrl
+  });
+  const provider = createTeraboxApi({
+    apiKey: 'test-key',
+    apiSecret: 'test-secret',
+    fetchImpl: async (url, options) => {
+      if (url.href === fileUrl) {
+        assert.equal(options.headers, undefined);
+        calls.push('download');
+        return new Response(content);
+      }
+      assert.equal(url.href, 'https://api.teraboxdl.site/v1/api');
+      assert.equal(options.redirect, 'manual');
+      assert.equal(options.method, 'POST');
+      const { url: submitted, dir_path: path, page } = JSON.parse(options.body);
+      assert.equal(submitted, share);
+      assert.equal(page, 1);
+      const expected = createHmac('sha256', 'test-secret')
+        .update('POST/v1/api' + options.headers['X-Timestamp'] + options.body)
+        .digest('hex');
+      assert.equal(options.headers['X-Signature'], expected);
+      assert.equal(options.headers['X-API-Key'], 'test-key');
+      calls.push(path);
+      const list = path === '/Dokumen'
+        ? [file('99', 'Laporan.txt')]
+        : [
+          { fs_id: 2, server_filename: 'Dokumen', isdir: 1, path: '/Dokumen' },
+          file(3, 'contoh.txt'), file(4, 'arsip.txt'), file(5, 'lain.txt')
+        ];
+      return Response.json({ errno: 0, list });
+    }
+  });
+  const app = createTeradownServer({ provider, interactionTimeout: 5000 });
   await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => app.close(resolve)));
   const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 390, height: 844 } });
@@ -159,11 +196,20 @@ test('membuka folder dan mengunduh file melalui antarmuka Teradown', async (t) =
   await page.getByRole('button', { name: 'Buka Dokumen' }).click();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Unduh Laporan.txt' }).click();
-  const file = await download;
-  assert.equal(file.suggestedFilename(), 'Laporan.txt');
-  assert.equal(await readFile(await file.path(), 'utf8'), content);
+  const saved = await download;
+  assert.equal(saved.suggestedFilename(), 'Laporan.txt');
+  assert.equal(await readFile(await saved.path(), 'utf8'), content);
   assert.equal(page.url(), appUrl);
   await page.getByRole('button', { name: 'Semua file' }).click();
   await page.getByRole('button', { name: 'Unduh contoh.txt' }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+  assert.deepEqual(calls, ['', '/Dokumen', '/Dokumen', 'download']);
+});
+
+test('membatasi redirect unduhan ke host file yang didokumentasikan', async () => {
+  const provider = createTeraboxApi({ fetchImpl: async (url) => {
+    assert.equal(url.origin, 'https://d.terabox.app');
+    return Response.redirect('https://example.org/private');
+  } });
+  await assert.rejects(provider.download('https://d.terabox.app/example.txt'), /host file TeraBox yang didukung/);
 });

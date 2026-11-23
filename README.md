@@ -1,10 +1,10 @@
 # Teradown
 
-Aplikasi web dan CLI Node.js yang menggunakan Chromium dan formulir publik 1024Teradl untuk menampilkan file dari tautan berbagi TeraBox. Gunakan tautan yang Anda miliki atau diizinkan untuk diunduh. URL berbagi dikirim ke 1024Teradl saat formulir diisi dan dikirim.
+Aplikasi web Node.js untuk melihat dan mengunduh file dari tautan berbagi TeraBox. Web mengirim tautan yang dimasukkan ke TeraboxAPI. Gunakan tautan yang Anda miliki atau diizinkan untuk diunduh.
 
 ## Menjalankan
 
-Pasang Node.js 22 atau lebih baru serta Chromium atau Google Chrome. Pada Linux, CLI mencari `/usr/bin/chromium`; gunakan `CHROMIUM_PATH` jika browser terpasang di lokasi lain.
+Pasang Node.js 22 atau lebih baru. CLI dan tes browser juga memerlukan Chromium atau Google Chrome. Pada Linux, gunakan `CHROMIUM_PATH` jika browser terpasang di luar `/usr/bin/chromium`.
 
 ```sh
 npm ci
@@ -13,19 +13,24 @@ npm test
 
 ### Web
 
+Buat file `.env` di root proyek dan isi kedua variabel dengan key dan secret TeraboxAPI.
+
+```dotenv
+TERABOX_API_KEY=
+TERABOX_API_SECRET=
+```
+
 ```sh
 npm run web
 ```
 
-Buka `http://127.0.0.1:9876` di mesin yang menjalankan server. Atur `HOST` atau `PORT` jika perlu. Tempel tautan dan klik **Tampilkan file**. Daftar mendukung pencarian, navigasi folder, dan tombol **Unduh**. Browser menerima file dari server Teradown melalui halaman yang sama. Server menggunakan Chromium headless. Jika 1024Teradl meminta verifikasi manusia, gunakan CLI berjendela.
+Buka `http://127.0.0.1:9876` di mesin yang menjalankan server. Atur `HOST` atau `PORT` jika perlu. Tempel tautan dan klik **Tampilkan file**. Server menandatangani permintaan ke `api.teraboxdl.site` dan meneruskan file dari `d.terabox.app` ke browser. Daftar mengambil halaman pertama per folder. Tombol **Unduh** tersedia untuk file dengan `direct_link`.
 
 Untuk Cloudflare Tunnel, atur **Service URL** ke `http://127.0.0.1:9876`. Jalankan Teradown dan `cloudflared` pada mesin dan namespace jaringan yang sama agar connector dapat mencapai alamat loopback. Dari lingkungan tempat connector berjalan, periksa origin dengan `curl -fsS http://127.0.0.1:9876/`.
 
-`npm run web` membaca file `.env` di root proyek jika tersedia. Simpan konfigurasi lokal TeraboxAPI sebagai `TERABOX_API_KEY=`. Integrasi TeraboxAPI masih memerlukan kontrak endpoint yang terdokumentasi.
-
 ### CLI
 
-Setel `URL_TERA` ke URL berbagi HTTPS milik Anda, lalu jalankan:
+CLI menggunakan Chromium dan formulir publik 1024Teradl. Setel `URL_TERA` ke URL berbagi HTTPS milik Anda, lalu jalankan:
 
 ```sh
 npm start -- "$URL_TERA"
@@ -39,6 +44,6 @@ Secara default Chromium membuka jendela. Saat verifikasi manusia muncul, selesai
 
 ## Codex Cloud
 
-Jalankan perintah dari `/workspace/Teradown`. Gunakan `npm --cache /tmp/teradown-npm ci` jika direktori cache bawaan tidak dapat ditulis. `npm test` menjalankan Chromium pada server HTTP lokal untuk menguji formulir, daftar file, ekstraksi URL, dan unduhan tanpa menghubungi layanan publik. Pengujian live memerlukan izin koneksi HTTPS ke `1024teradl.com` serta ke host unduhan yang diberikan layanan jika browser perlu mengambil file. Mode berjendela memerlukan sesi desktop yang aktif dan variabel `DISPLAY` yang menunjuk ke sesi tersebut.
+Jalankan perintah dari `/workspace/Teradown`. Gunakan `npm --cache /tmp/teradown-npm ci` jika direktori cache bawaan tidak dapat ditulis. `npm test` menguji API dan unduhan dengan respons contoh lokal. Untuk menggunakan proxy Cloud dengan Node.js 24, jalankan `NODE_USE_ENV_PROXY=1 npm run web`. Pengujian web dengan layanan asli memerlukan izin HTTPS ke `api.teraboxdl.site` dan `d.terabox.app`. Mode CLI berjendela memerlukan sesi desktop aktif dan variabel `DISPLAY`.
 
 Pada desktop yang aktif, jalankan `TERADOWN_TEST_HEADED=1 npm test` untuk mengulang pengujian dengan jendela Chromium.

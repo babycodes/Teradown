@@ -76,10 +76,14 @@ function renderRow(entry) {
   const label = element('div', 'file-name');
   label.append(
     element('strong', null, name),
-    element('span', 'meta', folder ? 'Folder' : entry.action.match(/\(([^)]+)\)$/)?.[1] || 'File')
+    element('span', 'meta', folder ? 'Folder' : entry.size || 'File')
   );
   const action = element('button', 'action', folder ? 'Buka' : 'Unduh');
   action.type = 'button';
+  if (!folder && !entry.download) {
+    action.disabled = true;
+    action.textContent = 'Tidak tersedia';
+  }
   action.setAttribute('aria-label', `${folder ? 'Buka' : 'Unduh'} ${name}`);
   const symbol = element('span', folder ? null : 'arrow-down', folder ? '›' : '');
   symbol.setAttribute('aria-hidden', 'true');
@@ -144,7 +148,7 @@ async function load(path, url, name) {
     count.textContent = 'Isi tautan yang Anda masukkan';
   }
   setBusy(true);
-  showState(url ? 'Mencari file…' : 'Membuka folder…', 'Sedang mengambil isi dari 1024Teradl.', 'loading');
+  showState(url ? 'Mencari file…' : 'Membuka folder…', 'Sedang mengambil isi dari TeraboxAPI.', 'loading');
   try {
     const request = { method: 'POST' };
     if (url) {
