@@ -9,6 +9,7 @@ const searchWrap = document.querySelector('#search-wrap');
 const breadcrumbs = document.querySelector('#breadcrumbs');
 const notice = document.querySelector('#notice');
 const list = document.querySelector('#list');
+const downloads = document.querySelector('#downloads');
 
 let trail = [];
 let busy = false;
@@ -42,28 +43,93 @@ function setBusy(next) {
   for (const button of breadcrumbs.querySelectorAll('button')) button.disabled = next;
 }
 
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const megabyte = 1024 * 1024;
+  if (bytes < megabyte) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / megabyte).toFixed(1)} MB`;
+}
+
 function downloadFile(path, name) {
+  const id = Array.from(crypto.getRandomValues(new Uint32Array(4)), (value) =>
+    value.toString(16).padStart(8, '0')).join('');
+  const row = element('div', 'download-status');
+  const title = element('strong', null, name);
+  const meter = element('progress', 'download-meter');
+  meter.setAttribute('aria-label', `Progres unduhan ${name}`);
+  const text = element('span', 'download-message', 'Menyiapkan unduhan…');
+  text.setAttribute('role', 'status');
+  const amount = element('span', 'download-amount');
+  row.append(title, text, meter, amount);
+  downloads.prepend(row);
+  downloads.hidden = false;
+  const finished = downloads.querySelectorAll('[data-finished]');
+  for (const old of Array.from(finished).slice(4)) old.remove();
+
   const frame = element('iframe');
   frame.hidden = true;
   frame.title = `Unduhan ${name}`;
   document.body.append(frame);
   const source = frame.contentWindow;
-  const clear = () => {
+  let timer;
+  let lastResponse = Date.now();
+  let done = false;
+  const finish = (message, kind) => {
+    if (done) return;
+    done = true;
     pendingDownloads.delete(source);
     clearTimeout(timer);
-    frame.remove();
+    if (kind !== 'unknown') frame.remove();
+    row.dataset.finished = kind;
+    meter.hidden = true;
+    text.textContent = message;
   };
-  const timer = setTimeout(clear, 250_000);
-  pendingDownloads.set(source, clear);
-  frame.src = path;
-  showNotice(`Unduhan ${name} diminta. Penyimpanan akan muncul di browser saat file siap.`);
+  pendingDownloads.set(source, finish);
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set('progress', id);
+  frame.src = url.href;
+
+  async function poll() {
+    try {
+      const response = await fetch(`/api/download-status/${id}`, { signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error();
+      const progress = await response.json();
+      if (done) return;
+      lastResponse = Date.now();
+      if (progress.state === 'failed') {
+        finish(progress.message || 'Unduhan gagal. Silakan coba lagi.', 'error');
+        return;
+      }
+      if (progress.state !== 'preparing') {
+        const knownSize = progress.total > 0;
+        amount.textContent = knownSize
+          ? `${formatBytes(progress.bytes)} / ${formatBytes(progress.total)} · ${Math.min(100, Math.floor(progress.bytes * 100 / progress.total))}%`
+          : `${formatBytes(progress.bytes)} dikirim`;
+        if (knownSize) {
+          meter.max = progress.total;
+          meter.value = progress.bytes;
+        }
+        if (text.textContent !== 'Mengirim file…') text.textContent = 'Mengirim file…';
+      }
+      if (progress.state === 'complete') {
+        finish('Transfer selesai. Cek daftar unduhan browser.', 'complete');
+        return;
+      }
+    } catch {
+      if (Date.now() - lastResponse >= 20_000) {
+        finish('Status transfer tidak tersedia. Cek daftar unduhan browser.', 'unknown');
+        return;
+      }
+    }
+    if (!done) timer = setTimeout(poll, 750);
+  }
+  timer = setTimeout(poll, 250);
 }
 
 window.addEventListener('message', (event) => {
-  const clear = pendingDownloads.get(event.source);
-  if (!clear || event.origin !== window.location.origin || event.data?.type !== 'teradown-download-error') return;
-  clear();
-  showNotice(event.data.text, 'error');
+  const finish = pendingDownloads.get(event.source);
+  if (!finish || event.origin !== window.location.origin || event.data?.type !== 'teradown-download-error') return;
+  finish(event.data.text, 'error');
 });
 
 function renderRow(entry) {

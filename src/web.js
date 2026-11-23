@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { createTeraboxApi, TeraboxApiError } from './terabox-api.js';
+import { createTeraboxApi, ExpiredDownloadLinkError, TeraboxApiError } from './terabox-api.js';
 import { parseShareUrl } from './teradl.js';
 
 const assets = new Map([
@@ -13,8 +14,11 @@ const assets = new Map([
   ['/download-error.js', ['download-error.js', 'text/javascript; charset=utf-8']]
 ]);
 const lookupTtl = 30 * 60_000;
+const refreshCooldown = 60_000;
 const maxLookups = 100;
 const maxActiveJobs = 2;
+const maxDownloadStatuses = 100;
+const downloadIdleTimeout = 90_000;
 
 function sendJson(res, status, value) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -72,15 +76,57 @@ function parseEntries(entries, dirPath) {
 
 export function createTeradownServer({ provider = createTeraboxApi(), interactionTimeout = 25_000 } = {}) {
   const lookups = new Map();
+  const directories = new Map();
+  const pending = new Map();
+  const downloadStatuses = new Map();
   let activeJobs = 0;
+
+  async function loadDirectory(shareUrl, dirPath, rejectedListing) {
+    const key = JSON.stringify([shareUrl, dirPath]);
+    if (pending.has(key)) return pending.get(key);
+    const cached = directories.get(key);
+    if (cached?.expires > Date.now() && cached !== rejectedListing) return cached;
+
+    // A shared request can finish even if one of its callers disconnects.
+    const request = (async () => {
+      const entries = await provider.list(shareUrl, dirPath, AbortSignal.timeout(interactionTimeout));
+      const listing = {
+        ...parseEntries(entries, dirPath),
+        id: randomUUID(),
+        key,
+        shareUrl,
+        dirPath,
+        expires: Date.now() + lookupTtl,
+        refreshedAt: rejectedListing ? Date.now() : 0
+      };
+      if (lookups.size >= maxLookups) {
+        const [oldId, oldListing] = lookups.entries().next().value;
+        lookups.delete(oldId);
+        if (directories.get(oldListing.key) === oldListing) directories.delete(oldListing.key);
+      }
+      lookups.set(listing.id, listing);
+      directories.set(key, listing);
+      return listing;
+    })();
+    pending.set(key, request);
+    try {
+      return await request;
+    } catch (error) {
+      if (rejectedListing) rejectedListing.refreshedAt = Date.now();
+      throw error;
+    } finally {
+      pending.delete(key);
+    }
+  }
 
   return createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; form-action 'self'; base-uri 'none'");
-    const pathname = URL.parse(req.url, 'http://teradown.local')?.pathname;
-    if (!pathname) return fail(res, 400, 'Alamat permintaan tidak valid.');
+    const url = URL.parse(req.url, 'http://teradown.local');
+    if (!url) return fail(res, 400, 'Alamat permintaan tidak valid.');
+    const { pathname } = url;
     const asset = req.method === 'GET' && assets.get(pathname);
     if (asset) {
       const [file, type] = asset;
@@ -97,11 +143,39 @@ export function createTeradownServer({ provider = createTeraboxApi(), interactio
     const lookup = req.method === 'POST' && pathname === '/api/files';
     const folder = req.method === 'POST' && pathname.match(/^\/api\/folder\/([\da-f-]{36})\/(\d+)$/);
     const download = req.method === 'GET' && pathname.match(/^\/api\/download\/([\da-f-]{36})\/(\d+)$/);
-    if (!lookup && !download && !folder) return fail(res, 404, 'Halaman tidak ditemukan.');
+    const status = req.method === 'GET' && pathname.match(/^\/api\/download-status\/([a-f0-9]{32})$/);
+    if (!lookup && !download && !folder && !status) return fail(res, 404, 'Halaman tidak ditemukan.');
     if (req.headers['sec-fetch-site'] === 'cross-site') return fail(res, 403, 'Buka Teradown untuk melanjutkan.', download);
+    if (status) {
+      const progress = downloadStatuses.get(status[1]);
+      if (!progress) return fail(res, 404, 'Status unduhan belum tersedia.');
+      return sendJson(res, 200, progress);
+    }
+
+    let progress;
+    const progressId = download && url.searchParams.get('progress');
+    if (progressId && /^[a-f0-9]{32}$/.test(progressId)) {
+      if (downloadStatuses.has(progressId)) {
+        return fail(res, 409, 'Unduhan ini sudah diminta.', download);
+      }
+      if (downloadStatuses.size >= maxDownloadStatuses) {
+        for (const [id, entry] of downloadStatuses) {
+          if (!['complete', 'failed'].includes(entry.state)) continue;
+          downloadStatuses.delete(id);
+          break;
+        }
+      }
+      progress = { state: 'preparing', bytes: 0, total: null };
+      downloadStatuses.set(progressId, progress);
+    }
+    const failRequest = (statusCode, message) => {
+      if (progress) Object.assign(progress, { state: 'failed', message });
+      if (!res.destroyed && !res.headersSent) fail(res, statusCode, message, download);
+    };
 
     let shareUrl;
     let selected;
+    let originalListing;
     let dirPath = '';
     if (lookup) {
       try {
@@ -113,8 +187,7 @@ export function createTeradownServer({ provider = createTeraboxApi(), interactio
       const [, id, index] = download || folder;
       const entry = lookups.get(id);
       if (!entry || entry.expires < Date.now()) {
-        lookups.delete(id);
-        return fail(res, 410, 'Daftar file sudah kedaluwarsa. Tampilkan ulang tautannya.', download);
+        return failRequest(410, 'Daftar file sudah kedaluwarsa. Tampilkan ulang tautannya.');
       }
       const offset = Number(index) - 1;
       dirPath = entry.dirPath;
@@ -124,29 +197,27 @@ export function createTeradownServer({ provider = createTeraboxApi(), interactio
         dirPath = next.path;
       } else {
         selected = entry.files[offset];
-        if (!selected) return fail(res, 404, 'File tidak ditemukan.', download);
+        if (!selected) return failRequest(404, 'File tidak ditemukan.');
+        originalListing = entry;
       }
       shareUrl = entry.shareUrl;
     }
 
-    if (activeJobs >= maxActiveJobs) return fail(res, 503, 'Teradown sedang memproses unduhan lain. Coba lagi sebentar.', download);
+    if (activeJobs >= maxActiveJobs) return failRequest(503, 'Teradown sedang memproses unduhan lain. Coba lagi sebentar.');
     activeJobs += 1;
     const controller = new AbortController();
-    const disconnect = () => controller.abort();
+    const disconnect = () => {
+      if (!res.writableFinished) controller.abort();
+    };
     res.once('close', disconnect);
-    const deadline = setTimeout(disconnect, download ? 240_000 : interactionTimeout);
+    const deadline = setTimeout(
+      () => controller.abort(new DOMException('Unduhan tidak aktif.', 'TimeoutError')),
+      download ? downloadIdleTimeout : interactionTimeout
+    );
     try {
-      const entries = await provider.list(shareUrl, dirPath, controller.signal);
-      const { files, folders } = parseEntries(entries, dirPath);
       if (!download) {
-        for (const [id, entry] of lookups) {
-          if (entry.expires < Date.now()) lookups.delete(id);
-        }
-        if (lookups.size >= maxLookups) lookups.delete(lookups.keys().next().value);
-        const id = randomUUID();
-        lookups.set(id, {
-          shareUrl, dirPath, folders, files: files.map(({ id }) => ({ id })), expires: Date.now() + lookupTtl
-        });
+        const { id, files, folders } = await loadDirectory(shareUrl, dirPath);
+        controller.signal.throwIfAborted();
         sendJson(res, 200, {
           folders: folders.map(({ name }, index) => ({ name, open: `/api/folder/${id}/${index + 1}` })),
           files: files.map(({ name, size, link }, index) => ({
@@ -156,9 +227,25 @@ export function createTeradownServer({ provider = createTeraboxApi(), interactio
         return;
       }
 
-      const current = files.find(({ id }) => id === selected.id);
-      if (!current) return fail(res, 409, 'Daftar file berubah. Tampilkan ulang tautannya.', download);
-      const response = await provider.download(current.link, controller.signal);
+      const cached = directories.get(originalListing.key);
+      const listing = cached?.expires > Date.now() ? cached : originalListing;
+      const findSelected = (directory) => {
+        const file = directory.files.find(({ id }) => id === selected.id);
+        if (!file) throw new TeraboxApiError('Daftar file berubah. Tampilkan ulang tautannya.', 409);
+        return file;
+      };
+      let current = findSelected(listing);
+      let response;
+      try {
+        response = await provider.download(current.link, controller.signal);
+      } catch (error) {
+        if (!(error instanceof ExpiredDownloadLinkError) || Date.now() - listing.refreshedAt < refreshCooldown) {
+          throw error;
+        }
+        controller.signal.throwIfAborted();
+        current = findSelected(await loadDirectory(shareUrl, dirPath, listing));
+        response = await provider.download(current.link, controller.signal);
+      }
       const headers = {
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': attachment(current.name)
@@ -167,15 +254,30 @@ export function createTeradownServer({ provider = createTeraboxApi(), interactio
       if (/^\d+$/.test(length) && !response.headers.has('content-encoding')) {
         headers['Content-Length'] = length;
       }
+      const total = Number(headers['Content-Length']);
+      if (progress) Object.assign(progress, {
+        state: 'transferring', total: Number.isSafeInteger(total) ? total : null
+      });
+      const trackTransfer = new Transform({
+        transform(chunk, encoding, callback) {
+          deadline.refresh();
+          if (progress) progress.bytes += chunk.length;
+          callback(null, chunk);
+        }
+      });
       res.writeHead(200, headers);
-      await pipeline(response.body, res, { signal: controller.signal });
-    } catch (error) {
-      if (!res.destroyed && !res.headersSent) {
-        const status = controller.signal.aborted ? 504 : error instanceof TeraboxApiError ? error.status : 502;
-        const message = status === 504 ? 'Waktu tunggu terlampaui. Silakan coba lagi.'
-          : error instanceof TeraboxApiError ? error.message : 'Permintaan TeraboxAPI gagal. Coba lagi sebentar.';
-        fail(res, status, message, download);
+      await pipeline(response.body, trackTransfer, res, { signal: controller.signal });
+      if (progress && progress.total !== null && progress.bytes !== progress.total) {
+        return failRequest(502, 'Ukuran transfer tidak sesuai. Silakan unduh ulang.');
       }
+      if (progress) progress.state = 'complete';
+    } catch (error) {
+      const timedOut = (controller.signal.reason ?? error).name === 'TimeoutError';
+      const statusCode = timedOut ? 504 : error instanceof TeraboxApiError ? error.status : 502;
+      const message = timedOut ? 'Waktu tunggu terlampaui. Silakan coba lagi.'
+        : error instanceof TeraboxApiError ? error.message
+        : download ? 'Transfer unduhan terputus. Silakan coba lagi.' : 'Permintaan TeraboxAPI gagal. Coba lagi sebentar.';
+      failRequest(statusCode, message);
     } finally {
       clearTimeout(deadline);
       res.off('close', disconnect);

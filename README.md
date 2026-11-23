@@ -26,6 +26,10 @@ npm run web
 
 Buka `http://127.0.0.1:9876` di mesin yang menjalankan server. Atur `HOST` atau `PORT` jika perlu. Tempel tautan dan klik **Tampilkan file**. Server menandatangani permintaan ke `api.teraboxdl.site` dan meneruskan file dari `d.terabox.app` ke browser. Daftar mengambil halaman pertama per folder. Tombol **Unduh** tersedia untuk file dengan `direct_link`.
 
+Server menyimpan daftar dan tautan unduhan per URL berbagi dan folder selama 30 menit, dengan kapasitas 100 daftar dalam memori. Permintaan bersamaan untuk folder yang sama berbagi satu panggilan TeraboxAPI. Unduhan memakai tautan yang tersimpan. Jika host file mengembalikan HTTP 401, 403, atau 410, server memperbarui daftar dan mencoba unduhan sekali lagi. Ada jeda satu menit antarpercobaan pembaruan untuk daftar yang sama.
+
+Saat Anda mengunduh file, halaman menunjukkan data yang dikirim dan persentase jika ukuran transfer tersedia. Setelah transfer selesai, periksa daftar unduhan browser untuk status penyimpanan file.
+
 Untuk Cloudflare Tunnel, atur **Service URL** ke `http://127.0.0.1:9876`. Jalankan Teradown dan `cloudflared` pada mesin dan namespace jaringan yang sama agar connector dapat mencapai alamat loopback. Dari lingkungan tempat connector berjalan, periksa origin dengan `curl -fsS http://127.0.0.1:9876/`.
 
 ### CLI

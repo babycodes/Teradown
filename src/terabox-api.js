@@ -10,6 +10,8 @@ export class TeraboxApiError extends Error {
   }
 }
 
+export class ExpiredDownloadLinkError extends TeraboxApiError {}
+
 function fileUrl(value) {
   const url = typeof value === 'string' ? URL.parse(value) : null;
   if (!url || url.origin !== 'https://d.terabox.app' || url.username || url.password) {
@@ -48,6 +50,7 @@ export function createTeraboxApi({
         signal
       });
     } catch {
+      signal?.throwIfAborted();
       throw new TeraboxApiError('Server Teradown tidak dapat terhubung ke TeraboxAPI.');
     }
     if (!response.ok) {
@@ -91,7 +94,11 @@ export function createTeraboxApi({
       }
       if (response.status === 200 && response.body) return response;
       await response.body?.cancel();
-      throw new TeraboxApiError(`Host file TeraBox menolak unduhan (HTTP ${response.status}).`);
+      const message = `Host file TeraBox menolak unduhan (HTTP ${response.status}).`;
+      if ([401, 403, 410].includes(response.status)) {
+        throw new ExpiredDownloadLinkError(message);
+      }
+      throw new TeraboxApiError(message);
     }
     throw new TeraboxApiError('Host file TeraBox mengirim terlalu banyak pengalihan.');
   }

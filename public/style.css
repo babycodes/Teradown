@@ -90,6 +90,14 @@ h1 { font-size: clamp(36px, 6vw, 59px); font-weight: 790; line-height: 1.02; let
 .brand-icon .arrow-down { transform: scale(1.25); }
 .notice { padding: 10px 24px; border-bottom: 1px solid var(--border); color: #4e3387; background: #f6f1ff; font-size: 13px; }
 .notice[data-kind="error"] { background: #fff3f4; color: #9f283f; }
+.download-list { background: #faf8ff; border-bottom: 1px solid var(--border); }
+.download-status { display: grid; gap: 5px; padding: 13px 24px; color: #4e3387; font-size: 13px; }
+.download-status + .download-status { border-top: 1px solid var(--border); }
+.download-status strong { color: #302742; overflow-wrap: anywhere; }
+.download-meter { width: 100%; height: 10px; accent-color: #7049e9; }
+.download-amount { font-variant-numeric: tabular-nums; color: var(--muted); }
+.download-status[data-finished="error"] .download-message { color: #9f283f; }
+.download-status[data-finished="complete"] .download-message { color: #21654a; }
 .footer { text-align: right; margin: 22px 1px; color: var(--muted); font-size: 12px; }
 
 @media (max-width: 660px) {
@@ -101,7 +109,7 @@ h1 { font-size: clamp(36px, 6vw, 59px); font-weight: 790; line-height: 1.02; let
   .results { margin-top: 19px; border-radius: 18px; }
   .results-header { padding-inline: 15px; flex-wrap: wrap; }
   .search { flex: 1 0 100%; }
-  .file-row, .notice, .breadcrumbs { padding-inline: 15px; }
+  .file-row, .notice, .breadcrumbs, .download-status { padding-inline: 15px; }
 }
 
 @media (max-width: 455px) {

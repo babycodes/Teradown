@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { getDownload, listFiles, parseShareUrl, submitShare } from '../src/teradl.js';
 import { createTeradownServer } from '../src/web.js';
@@ -137,8 +138,12 @@ test('mengambil tautan langsung dari hasil', async (t) => {
 test('membuka folder dan mengunduh file melalui antarmuka Teradown', async (t) => {
   const calls = [];
   const fileUrl = 'https://d.terabox.app/example.txt';
+  const brokenUrl = 'https://d.terabox.app/failed.txt';
+  const release = Promise.withResolvers();
+  const bytes = new TextEncoder().encode(content);
+  t.after(() => release.resolve());
   const file = (id, name) => ({
-    fs_id: id, server_filename: name, formatted_size: '21 B', direct_link: fileUrl
+    fs_id: id, server_filename: name, formatted_size: '21 B', direct_link: id === 4 ? brokenUrl : fileUrl
   });
   const provider = createTeraboxApi({
     apiKey: 'test-key',
@@ -147,8 +152,17 @@ test('membuka folder dan mengunduh file melalui antarmuka Teradown', async (t) =
       if (url.href === fileUrl) {
         assert.equal(options.headers, undefined);
         calls.push('download');
-        return new Response(content);
+        const stream = new ReadableStream({
+          async start(controller) {
+            controller.enqueue(bytes.slice(0, 10));
+            await release.promise;
+            controller.enqueue(bytes.slice(10));
+            controller.close();
+          }
+        });
+        return new Response(stream, { headers: { 'Content-Length': String(bytes.length) } });
       }
+      if (url.href === brokenUrl) return new Response(null, { status: 502 });
       assert.equal(url.href, 'https://api.teraboxdl.site/v1/api');
       assert.equal(options.redirect, 'manual');
       assert.equal(options.method, 'POST');
@@ -196,14 +210,69 @@ test('membuka folder dan mengunduh file melalui antarmuka Teradown', async (t) =
   await page.getByRole('button', { name: 'Buka Dokumen' }).click();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Unduh Laporan.txt' }).click();
+  await page.getByText('10 B / 21 B · 47%', { exact: true }).waitFor();
+  release.resolve();
   const saved = await download;
   assert.equal(saved.suggestedFilename(), 'Laporan.txt');
   assert.equal(await readFile(await saved.path(), 'utf8'), content);
+  await page.getByText('Transfer selesai. Cek daftar unduhan browser.', { exact: true }).waitFor();
   assert.equal(page.url(), appUrl);
   await page.getByRole('button', { name: 'Semua file' }).click();
   await page.getByRole('button', { name: 'Unduh contoh.txt' }).waitFor();
+  await page.getByRole('button', { name: 'Unduh arsip.txt' }).click();
+  await page.getByText('Host file TeraBox menolak unduhan (HTTP 502).', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
-  assert.deepEqual(calls, ['', '/Dokumen', '/Dokumen', 'download']);
+  assert.deepEqual(calls, ['', '/Dokumen', 'download']);
+});
+
+test('berbagi cache permintaan dan memperbarui tautan kedaluwarsa sekali', async (t) => {
+  let lookups = 0;
+  const attemptedLinks = [];
+  const provider = createTeraboxApi({
+    apiKey: 'test-key',
+    apiSecret: 'test-secret',
+    fetchImpl: async (url) => {
+      if (url.hostname === 'api.teraboxdl.site') {
+        lookups += 1;
+        await delay(30);
+        return Response.json({
+          errno: 0,
+          list: [{
+            fs_id: 1, server_filename: 'contoh.txt',
+            direct_link: `https://d.terabox.app/contoh.txt?v=${lookups}`
+          }]
+        });
+      }
+      const version = url.searchParams.get('v');
+      attemptedLinks.push(version);
+      return version === '1' ? new Response(null, { status: 403 }) : new Response(content);
+    }
+  });
+  const app = createTeradownServer({ provider });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => app.close(resolve)));
+  const appUrl = `http://127.0.0.1:${app.address().port}`;
+  const list = async () => {
+    const response = await fetch(`${appUrl}/api/files`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: share })
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const [first, second] = await Promise.all([list(), list()]);
+  assert.deepEqual(second, first);
+  assert.deepEqual(await list(), first);
+  assert.equal(lookups, 1);
+
+  const getFile = async () => {
+    const response = await fetch(appUrl + first.files[0].download);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), content);
+  };
+  await Promise.all([getFile(), getFile()]);
+  await getFile();
+  assert.equal(lookups, 2);
+  assert.equal(attemptedLinks.filter((version) => version === '2').length, 3);
 });
 
 test('membatasi redirect unduhan ke host file yang didokumentasikan', async () => {
